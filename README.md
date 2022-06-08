@@ -59,3 +59,8 @@ Installing
 
 These modules are still in a very early stage of development; stay tuned for
 installation instructions later! :)
+
+Example
+-------
+
+An example playbook that creates an components needed to run an openvpn server can be found in the example/ directory.
