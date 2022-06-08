@@ -1,0 +1,113 @@
+---
+- gather_facts: no
+  hosts: all
+  connection: local
+
+  tasks:
+    - name: Create ip pool for connecting ovpn clients
+      mt_ip:
+        hostname:      "{{ inventory_hostname }}"
+        username:      "{{ mt_user }}"
+        password:      "{{ mt_pass }}"
+        parameter:     pool
+        state:         present
+        settings:
+          name:       ovpn-client-pool
+          ranges:  172.16.16.2-172.16.16.254
+
+    - name: Create ppp-profile for ovpn
+      mt_ppp_profile:
+        hostname:      "{{ inventory_hostname }}"
+        username:      "{{ mt_user }}"
+        password:      "{{ mt_pass }}"
+        state:         present
+        settings:
+          name:            ovpn-profile
+          local-address:   172.16.16.1
+          remote-address:  ovpn-client-pool
+          use-encryption:  required
+          use-upnp:        n
+          only-one:        n
+
+    - name: Add example ovpn user
+      mt_ppp_secret:
+        hostname:      "{{ inventory_hostname }}"
+        username:      "{{ mt_user }}"
+        password:      "{{ mt_pass }}"
+        state:         present
+        settings:
+          name:     example-ovpn-user1
+          password: pass1
+          service:  ovpn
+          profile:  ovpn-profile
+
+    # Expect module (commented) might be better option
+    # Some combo of Py2 (required by ansible-mikrotik) and macos prevent expect from working correctly
+    # (error module missing shebang interpreter line.. even though line is there)
+    # If on linux you may try converting below sshpass lines to expect
+    # - name: Transfer rsa keys and certs
+    #   expect:
+    #     command: "scp ovpn-ca.crt {{ mt_user }}@{{ inventory_hostname }}:/"
+    #     responses:
+    #       .*password: "{{ mt_pass }}"
+
+    - name: Transfer rsa keys and certs
+      command: sshpass -p '{{ mt_pass }}' scp ovpn-ca.crt ovpn-server.crt ovpn-server.key {{ mt_user }}@{{ inventory_hostname }}:/
+
+    - name: Give mikrotik time. Without delay, below imports fail
+      command: sleep 4
+
+    - name: Import ovpn-ca-cert
+      mt_command:
+        hostname:   "{{ inventory_hostname }}"
+        username:   "{{ mt_user }}"
+        password:   "{{ mt_pass }}"
+        command:    /certificate/import
+        command_arguments:
+          file-name: ovpn-ca.crt
+          name:      ovpn-ca
+          passphrase: ""
+
+    - name: Import ovpn-server-cert
+      mt_command:
+        hostname:   "{{ inventory_hostname }}"
+        username:   "{{ mt_user }}"
+        password:   "{{ mt_pass }}"
+        command:    /certificate/import
+        command_arguments:
+          file-name: ovpn-server.crt
+          name:      ovpn-server
+          passphrase: ""
+
+    - name: Import ovpn-server-key
+      mt_command:
+        hostname:   "{{ inventory_hostname }}"
+        username:   "{{ mt_user }}"
+        password:   "{{ mt_pass }}"
+        command:    /certificate/import
+        command_arguments:
+          file-name: ovpn-server.key
+          name:      ovpn-server
+          passphrase: ""
+
+    - name: Config and enable ovpn server
+      mt_ppp_server:
+        hostname:      "{{ inventory_hostname }}"
+        username:      "{{ mt_user }}"
+        password:      "{{ mt_pass }}"
+        server_type:   ovpn
+        settings:
+          enabled:  "yes"
+          port:     443
+          mode:     ip
+          netmask:  24
+          auth:     sha1
+          cipher:   aes128,aes256
+          certificate: ovpn-server
+          require-client-certificate: "yes"
+          keepalive-timeout: 30
+          default-profile: ovpn-profile
+
+    - name: Print congratulations
+      debug:
+        msg: "Congrats! Now create client ovpn config with client key and you are ready to VPN!"
